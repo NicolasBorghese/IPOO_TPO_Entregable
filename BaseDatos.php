@@ -1,146 +1,125 @@
-﻿<?php
-/* IMPORTANTE !!!!  Clase para (PHP 5, PHP 7)*/
+<?php
+/* Clase de conexión a base de datos PostgreSQL via PDO (PHP 7+) */
 
 class BaseDatos {
     private $HOSTNAME;
     private $BASEDATOS;
     private $USUARIO;
     private $CLAVE;
+    private $PUERTO;
     private $CONEXION;
     private $QUERY;
     private $RESULT;
     private $ERROR;
+
     /**
-     * Constructor de la clase que inicia ls variables instancias de la clase
-     * vinculadas a la coneccion con el Servidor de BD
+     * Constructor de la clase que inicia las variables de conexión al servidor de BD
      */
     public function __construct(){
-        $this->HOSTNAME = "127.0.0.1";
+        $this->HOSTNAME  = "127.0.0.1";
         $this->BASEDATOS = "bdviajefeliz";
-        $this->USUARIO = "root";
-        $this->CLAVE="";
-        /*
-        Análisis de error:
-        Se asigna un valor por default que puede ser interpretado correctamente al realizar
-        las consultas "mysqli_fetch_assoc()" y "mysqli_free_result()" en la función Registro
-        */
-        //$this->RESULT=0;
-        $this->RESULT=false;
-        $this->QUERY="";
-        $this->ERROR="";
+        $this->USUARIO   = "postgres";
+        $this->CLAVE     = "1234";
+        $this->PUERTO    = "5432";
+        $this->RESULT    = false;
+        $this->QUERY     = "";
+        $this->ERROR     = "";
     }
+
     /**
-     * Funcion que retorna una cadena
-     * con una peque�a descripcion del error si lo hubiera
+     * Retorna una cadena con la descripción del error si lo hubiera
      *
      * @return string
      */
     public function getError(){
-        return "\n".$this->ERROR;
-        
+        return "\n" . $this->ERROR;
     }
-    
+
     /**
-     * Inicia la coneccion con el Servidor y la  Base Datos Mysql.
-     * Retorna true si la coneccion con el servidor se pudo establecer y false en caso contrario
+     * Inicia la conexión con el servidor PostgreSQL.
+     * Retorna true si la conexión se pudo establecer, false en caso contrario.
      *
      * @return boolean
      */
     public function Iniciar(){
-        $resp  = false;
-        $conexion = mysqli_connect($this->HOSTNAME,$this->USUARIO,$this->CLAVE,$this->BASEDATOS);
-        if ($conexion){
-            if (mysqli_select_db($conexion,$this->BASEDATOS)){
-                $this->CONEXION = $conexion;
-                unset($this->QUERY);
-                unset($this->ERROR);
-                $resp = true;
-            }  else {
-                $this->ERROR = mysqli_errno($conexion) . ": " .mysqli_error($conexion);
-            }
-        }else{
-            /*
-            Análisis de error:
-            La función mysqli_errno en PHP es utilizada para obtener el número de error de la última operación 
-            realizada con la extensión MySQLi. Esta función toma como parámetro una conexión MySQLi y 
-            devuelve el código de error asociado a la última operación que se realizó en dicha conexión.
-            OBSERVACIÓN: Si la conexión no existe (es false) no se pueden consultar errores con mysqli_errno
-            */
-            //$this->ERROR =  mysqli_errno($conexion) . ": " .mysqli_error($conexion);
-            $this->ERROR = "ERROR: no se pudo realizar la conexión a la base de datos";
+        $resp = false;
+        try {
+            $dsn = "pgsql:host={$this->HOSTNAME};port={$this->PUERTO};dbname={$this->BASEDATOS}";
+            $this->CONEXION = new PDO($dsn, $this->USUARIO, $this->CLAVE, [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
+            ]);
+            unset($this->QUERY);
+            unset($this->ERROR);
+            $resp = true;
+        } catch (PDOException $e) {
+            $this->ERROR = "ERROR: no se pudo realizar la conexión a la base de datos. " . $e->getMessage();
         }
         return $resp;
     }
-    
+
     /**
      * Ejecuta una consulta en la Base de Datos.
-     * Recibe la consulta en una cadena enviada por parametro.
+     * Recibe la consulta en una cadena enviada por parámetro.
      *
      * @param string $consulta
      * @return boolean
      */
     public function Ejecutar($consulta){
-        $resp  = false;
+        $resp = false;
         unset($this->ERROR);
         $this->QUERY = $consulta;
-        if($this->RESULT = mysqli_query( $this->CONEXION,$consulta)){
+        try {
+            $this->RESULT = $this->CONEXION->query($consulta);
             $resp = true;
-        } else {
-            $this->ERROR =mysqli_errno( $this->CONEXION).": ". mysqli_error( $this->CONEXION);
+        } catch (PDOException $e) {
+            $this->ERROR = $e->getCode() . ": " . $e->getMessage();
         }
         return $resp;
     }
-    
+
     /**
-     * Devuelve un registro retornado por la ejecucion de una consulta
-     * el puntero se despleza al siguiente registro de la consulta
+     * Devuelve un registro retornado por la ejecución de una consulta.
+     * El puntero se desplaza al siguiente registro.
      *
-     * @return boolean
+     * @return array|null
      */
-    public function Registro() {
+    public function Registro(){
         $resp = null;
         if ($this->RESULT){
             unset($this->ERROR);
-            /*Si existe un resultado para una consulta se va a guardar en forma de arreglo asociativo
-            y se retornará ese array, en caso contrario retornará false o null*/
-            if($temp = mysqli_fetch_assoc($this->RESULT)){
+            $temp = $this->RESULT->fetch(PDO::FETCH_ASSOC);
+            if ($temp !== false){
                 $resp = $temp;
-            }else{
-                mysqli_free_result($this->RESULT);
+            } else {
+                $this->RESULT = false;
             }
-        }else{
-            $this->ERROR = mysqli_errno($this->CONEXION) . ": " . mysqli_error($this->CONEXION);
+        } else {
+            $this->ERROR = "No hay resultado disponible para la consulta.";
         }
-        return $resp ;
+        return $resp;
     }
-    
+
     /**
-     * Devuelve el id de un campo autoincrement utilizado como clave de una tabla
-     * Retorna el id numerico del registro insertado, devuelve null en caso que la ejecucion de la consulta falle
+     * Ejecuta un INSERT y devuelve el id generado automáticamente por la secuencia.
+     * Retorna el id numérico del registro insertado, null si falla.
      *
      * @param string $consulta
-     * @return int id de la tupla insertada
+     * @return int|null
      */
     public function devuelveIDInsercion($consulta){
         $resp = null;
         unset($this->ERROR);
         $this->QUERY = $consulta;
-        if ($this->RESULT = mysqli_query($this->CONEXION,$consulta)){
-            /*
-            Análisis de error:
-            La función mysqli_insert_id en PHP se utiliza para obtener el ID generado automáticamente
-            por una consulta INSERT en una tabla con una columna de tipo AUTO_INCREMENT.
-            Esta función toma como parámetro una conexión MySQLi y devuelve el último ID insertado
-            en esa conexión.
-             */
-            // $id = mysqli_insert_id();
-            $id = mysqli_insert_id($this->CONEXION);
-            $resp =  $id;
-        } else {
-            $this->ERROR =mysqli_errno( $this->CONEXION) . ": " . mysqli_error( $this->CONEXION);  
+        try {
+            $this->CONEXION->exec($consulta);
+            // lastval() devuelve el último valor generado por cualquier secuencia en la sesión actual
+            $stmt = $this->CONEXION->query("SELECT lastval()");
+            $row  = $stmt->fetch(PDO::FETCH_NUM);
+            $resp = (int)$row[0];
+        } catch (PDOException $e) {
+            $this->ERROR = $e->getCode() . ": " . $e->getMessage();
         }
-    return $resp;
+        return $resp;
     }
-    
 }
 ?>
